@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Absensi Internal - Gorontalo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container" id="app-container">
+        <!-- Login Screen -->
+        <section id="login-screen">
+            <h1>Absensi Internal</h1>
+            <p style="text-align: center;">Silakan masukkan password akses untuk melanjutkan.</p>
+            <div class="form-group">
+                <label for="access-password">Password Akses</label>
+                <input type="password" id="access-password" placeholder="Masukkan password...">
+            </div>
+            <button id="btn-login" class="btn btn-primary">Masuk</button>
+            <div id="login-error" class="status-msg status-error hidden"></div>
+        </section>
+
+        <!-- Main Screen -->
+        <section id="main-screen" class="hidden">
+            <header>
+                <h1 id="app-title">Absensi Karyawan</h1>
+                <div id="user-info" class="attendance-status">
+                    <p style="font-weight: 600; margin-bottom: 5px;">Status Hari Ini:</p>
+                    <div id="status-checkin"><span>Check-In:</span> <span class="val">-</span></div>
+                    <div id="status-checkout"><span>Check-Out:</span> <span class="val">-</span></div>
+                </div>
+            </header>
+
+            <div id="action-area">
+                <div class="form-group">
+                    <label for="employee-search">Cari & Pilih Nama Anda</label>
+                    <div class="search-box">
+                        <input type="text" id="employee-search" placeholder="Ketik nama...">
+                    </div>
+                    <select id="employee-select">
+                        <option value="">-- Hasil Pencarian --</option>
+                    </select>
+                </div>
+
+                <div id="gps-status" class="status-msg status-info hidden">
+                    Mengecek lokasi...
+                </div>
+
+                <div id="attendance-btns">
+                    <button id="btn-checkin" class="btn btn-primary" disabled>Check-In</button>
+                    <button id="btn-checkout" class="btn btn-outline" disabled>Check-Out</button>
+                    <button id="btn-show-report" class="btn btn-secondary" style="margin-top: 10px;">Lihat Laporan</button>
+                </div>
+            </div>
+
+            <!-- Camera Area -->
+            <div id="camera-area" class="hidden">
+                <h2 id="process-title">Verifikasi Foto</h2>
+                <div class="camera-container">
+                    <video id="video" autoplay playsinline muted></video>
+                    <canvas id="canvas" class="hidden"></canvas>
+                    <div id="challenge-box" class="challenge-overlay">
+                        Tantangan: <br><strong id="challenge-text">...</strong>
+                    </div>
+                </div>
+                <button id="btn-capture" class="btn btn-primary">Ambil Foto & Kirim</button>
+                <button id="btn-cancel-camera" class="btn btn-secondary">Batal</button>
+            </div>
+
+            <!-- Final Summary Area -->
+            <div id="summary-area" class="hidden">
+                <div class="status-msg status-success">
+                    Berhasil! Absensi Anda telah tercatat (Local Mode).
+                </div>
+                <div id="photo-preview-container" style="margin-bottom: 20px; border-radius: 15px; overflow: hidden; border: 2px solid var(--tan);">
+                    <img id="captured-photo-preview" style="width: 100%; display: block;">
+                </div>
+                <button id="btn-back-home" class="btn btn-primary">Kembali</button>
+            </div>
+
+            <div id="global-status" class="status-msg hidden"></div>
+
+            <span class="logout-link" id="btn-logout">Logout</span>
+        </section>
+    </div>
+
+    <!-- Report Screen (Fixed Modal) -->
+    <div id="report-screen" class="hidden">
+        <div class="report-header">
+            <h1 style="margin-bottom: 0;">Laporan Absensi</h1>
+        </div>
+
+        <div class="report-content">
+            <div class="report-filters">
+                <h3>Filter Data</h3>
+                <div class="form-group">
+                    <label>Cari Nama Petugas</label>
+                    <div class="search-box">
+                        <input type="text" id="report-employee-search" placeholder="Ketik nama...">
+                    </div>
+                    <select id="filter-employee">
+                        <option value="">Semua Petugas</option>
+                    </select>
+                </div>                <div class="filter-row">
+                    <div class="form-group">
+                        <label>Mulai</label>
+                        <input type="date" id="filter-date-start">
+                    </div>
+                    <div class="form-group">
+                        <label>Sampai</label>
+                        <input type="date" id="filter-date-end">
+                    </div>
+                </div>
+                <button id="btn-export-csv" class="btn btn-outline" style="margin-top: 10px;">Unduh CSV (Excel)</button>
+            </div>
+
+            <div id="report-list">
+                <!-- Data cards will be rendered here -->
+            </div>
+        </div>
+        
+        <div class="report-footer">
+            <button id="btn-close-report" class="btn btn-primary">Tutup Laporan</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="config.js" onerror="alert('File config.js tidak ditemukan!')"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

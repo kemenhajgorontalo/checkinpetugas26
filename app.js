@@ -204,7 +204,7 @@ async function startAttendance(type) {
         }
 
         if (distanceFromOffice > allowedRadius) {
-            throw new Error(`Anda berada di luar area absensi. Jarak Anda ${distanceText}m dari titik absensi, batas maksimal ${allowedRadius}m.`);
+            throw new Error(`Anda berada di luar area absensi. Jarak Anda ${distanceText}m dari titik absensi.`);
         }
 
         showLocationStatus(`Lokasi valid. Jarak ${distanceText}m dari titik absensi, akurasi ±${accuracyText}m.`, "success");
@@ -530,7 +530,7 @@ async function exportToCSV() {
     await renderReport();
     if (!currentReportRows.length) return alert("Tidak ada data sesuai filter.");
 
-    const h = ["Tanggal", "Waktu", "Nama", "Tipe", "Lat", "Lng", "Akurasi", "Jarak", "Radius", "Status Lokasi", "Tantangan"];
+    const h = ["Tanggal", "Waktu", "Nama", "Tipe", "Lat", "Lng", "Akurasi", "Jarak", "Status Lokasi", "Tantangan"];
     const rows = currentReportRows.map(r => [
         r.localDate,
         r.localTime,
@@ -540,7 +540,6 @@ async function exportToCSV() {
         r.longitude,
         r.accuracy,
         r.distanceFromOfficeMeters,
-        r.allowedRadiusMeters,
         r.locationStatus,
         r.challenge
     ]);
@@ -693,8 +692,7 @@ function formatDistanceInfo(record) {
         return "Tidak tersedia";
     }
 
-    const radius = record.allowedRadiusMeters || CONFIG.OFFICE_LOCATION.ALLOWED_RADIUS_METERS;
-    return `${record.distanceFromOfficeMeters}m dari titik absensi (radius ${radius}m)`;
+    return `${record.distanceFromOfficeMeters}m dari titik absensi`;
 }
 
 function getCachedAttendanceHistory() {

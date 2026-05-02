@@ -320,6 +320,11 @@ async function saveAttendanceRecord(dataUrl) {
         longitude: userLocation.longitude,
         accuracy: userLocation.accuracy,
         distanceFromOfficeMeters: Math.round(dist),
+        officeLatitude: CONFIG.OFFICE_LOCATION.LAT,
+        officeLongitude: CONFIG.OFFICE_LOCATION.LNG,
+        allowedRadiusMeters: CONFIG.OFFICE_LOCATION.ALLOWED_RADIUS_METERS,
+        maxGpsAccuracyMeters: CONFIG.OFFICE_LOCATION.MAX_GPS_ACCURACY_METERS,
+        locationStatus: "valid",
         localDate: formatDateMakassar(now),
         localTime: formatTimeMakassar(now),
         createdAt: new Date().toISOString(),
@@ -477,6 +482,7 @@ async function renderReport() {
                 <div class="emp-name">${r.employeeName}</div>
                 <div class="time-info">Tanggal: ${r.localDate}</div>
                 <div class="time-info">Waktu: ${r.localTime}</div>
+                <div class="time-info">Jarak: ${formatDistanceInfo(r)}</div>
             </div>
             <div class="card-badge badge-${r.type}">${r.type === 'checkin' ? 'Check-In' : 'Check-Out'}</div>
         `;
@@ -524,7 +530,7 @@ async function exportToCSV() {
     await renderReport();
     if (!currentReportRows.length) return alert("Tidak ada data sesuai filter.");
 
-    const h = ["Tanggal", "Waktu", "Nama", "Tipe", "Lat", "Lng", "Akurasi", "Jarak", "Tantangan"];
+    const h = ["Tanggal", "Waktu", "Nama", "Tipe", "Lat", "Lng", "Akurasi", "Jarak", "Radius", "Status Lokasi", "Tantangan"];
     const rows = currentReportRows.map(r => [
         r.localDate,
         r.localTime,
@@ -534,6 +540,8 @@ async function exportToCSV() {
         r.longitude,
         r.accuracy,
         r.distanceFromOfficeMeters,
+        r.allowedRadiusMeters,
+        r.locationStatus,
         r.challenge
     ]);
     let csv = "data:text/csv;charset=utf-8," + [h, ...rows].map(row => row.map(csvCell).join(",")).join("\n");
@@ -667,8 +675,26 @@ async function getAttendanceHistory() {
 function normalizeAttendanceRecord(record) {
     return {
         ...record,
+        employeeId: String(record.employeeId || ""),
+        employeeName: String(record.employeeName || "Petugas tidak diketahui"),
+        type: record.type === "checkout" ? "checkout" : "checkin",
+        localDate: String(record.localDate || ""),
+        localTime: String(record.localTime || ""),
+        photoUrl: record.photoUrl || "",
+        distanceFromOfficeMeters: record.distanceFromOfficeMeters ?? "",
+        allowedRadiusMeters: record.allowedRadiusMeters ?? CONFIG.OFFICE_LOCATION.ALLOWED_RADIUS_METERS,
+        locationStatus: record.locationStatus || (record.distanceFromOfficeMeters !== undefined ? "valid" : ""),
         createdAt: record.createdAt || record.createdAtServer?.toDate?.()?.toISOString?.() || ""
     };
+}
+
+function formatDistanceInfo(record) {
+    if (record.distanceFromOfficeMeters === "" || record.distanceFromOfficeMeters === undefined || record.distanceFromOfficeMeters === null) {
+        return "Tidak tersedia";
+    }
+
+    const radius = record.allowedRadiusMeters || CONFIG.OFFICE_LOCATION.ALLOWED_RADIUS_METERS;
+    return `${record.distanceFromOfficeMeters}m dari titik absensi (radius ${radius}m)`;
 }
 
 function getCachedAttendanceHistory() {

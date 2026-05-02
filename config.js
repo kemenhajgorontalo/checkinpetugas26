@@ -28,10 +28,10 @@ const CONFIG = {
 
     // Konfigurasi Kantor
     OFFICE_LOCATION: {
-        LAT: 0.5333, // Contoh latitude
-        LNG: 123.0667, // Contoh longitude
-        ALLOWED_RADIUS_METERS: 100,
-        MAX_GPS_ACCURACY_METERS: 100
+        LAT: 0.5859928382763993,
+        LNG: 123.06092033058262,
+        ALLOWED_RADIUS_METERS: 20,
+        MAX_GPS_ACCURACY_METERS: 50
     },
 
     // Daftar Karyawan (Petugas Haji 2026)

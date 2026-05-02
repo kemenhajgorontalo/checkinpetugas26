@@ -115,6 +115,7 @@ function setupEventListeners() {
         summaryArea.classList.add('hidden');
         actionArea.classList.remove('hidden');
         resetCapturePreview();
+        showLocationStatus("");
         updateAttendanceStatus();
     });
 }
@@ -181,17 +182,33 @@ async function startAttendance(type) {
     }
 
     currentType = type;
-    showGlobalStatus("Meminta akses GPS...", "info");
+    const typeLabel = type === "checkin" ? "Check-In" : "Check-Out";
+    showGlobalStatus(`Meminta izin lokasi untuk ${typeLabel}...`, "info");
+    showLocationStatus("Mengambil lokasi perangkat. Pastikan izin lokasi aktif dan berada di titik absensi.", "info");
     
     try {
         const pos = await getCurrentPosition();
         userLocation = pos.coords;
+        const distanceFromOffice = calculateDistanceMeters(
+            userLocation.latitude,
+            userLocation.longitude,
+            CONFIG.OFFICE_LOCATION.LAT,
+            CONFIG.OFFICE_LOCATION.LNG
+        );
+        const distanceText = Math.round(distanceFromOffice);
+        const accuracyText = Math.round(userLocation.accuracy);
+        const allowedRadius = CONFIG.OFFICE_LOCATION.ALLOWED_RADIUS_METERS;
         
         if (userLocation.accuracy > CONFIG.OFFICE_LOCATION.MAX_GPS_ACCURACY_METERS) {
-            throw new Error(`Akurasi GPS buruk (${Math.round(userLocation.accuracy)}m).`);
+            throw new Error(`Akurasi lokasi belum cukup baik (±${accuracyText}m). Coba pindah ke area terbuka, aktifkan GPS presisi tinggi, lalu ulangi.`);
         }
 
-        showGlobalStatus("GPS Valid. Menyalakan kamera...", "info");
+        if (distanceFromOffice > allowedRadius) {
+            throw new Error(`Anda berada di luar area absensi. Jarak Anda ${distanceText}m dari titik absensi, batas maksimal ${allowedRadius}m.`);
+        }
+
+        showLocationStatus(`Lokasi valid. Jarak ${distanceText}m dari titik absensi, akurasi ±${accuracyText}m.`, "success");
+        showGlobalStatus("Lokasi valid. Menyalakan kamera...", "info");
         await startCamera();
         
         currentChallenge = CONFIG.CHALLENGES[Math.floor(Math.random() * CONFIG.CHALLENGES.length)];
@@ -202,7 +219,9 @@ async function startAttendance(type) {
         globalStatus.classList.add('hidden');
         
     } catch (err) {
-        showGlobalStatus(err.message, "error");
+        const message = getLocationErrorMessage(err);
+        showGlobalStatus(message, "error");
+        showLocationStatus(message, "error");
     }
 }
 
@@ -539,7 +558,15 @@ async function sha256(message) {
 }
 
 function getCurrentPosition() {
-    return new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 5000 }));
+    if (!navigator.geolocation) {
+        return Promise.reject(new Error("Browser tidak mendukung fitur lokasi."));
+    }
+
+    return new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 0
+    }));
 }
 
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
@@ -551,6 +578,19 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
     const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
+}
+
+function getLocationErrorMessage(err) {
+    if (err?.code === 1) {
+        return "Izin lokasi ditolak. Aktifkan izin lokasi untuk browser ini lalu ulangi absensi.";
+    }
+    if (err?.code === 2) {
+        return "Lokasi tidak tersedia. Pastikan GPS aktif dan koneksi perangkat stabil.";
+    }
+    if (err?.code === 3) {
+        return "Pengambilan lokasi terlalu lama. Coba ulangi dari area yang lebih terbuka.";
+    }
+    return err?.message || "Gagal membaca lokasi perangkat.";
 }
 
 function formatDateMakassar(date) {
@@ -745,6 +785,15 @@ function showStatus(el, msg, type) { el.textContent = msg; el.className = `statu
 function showGlobalStatus(msg, type = 'info') {
     if (!msg) { globalStatus.classList.add('hidden'); return; }
     globalStatus.textContent = msg; globalStatus.className = `status-msg status-${type}`; globalStatus.classList.remove('hidden');
+}
+function showLocationStatus(msg, type = 'info') {
+    if (!msg) {
+        gpsStatus.classList.add('hidden');
+        return;
+    }
+    gpsStatus.textContent = msg;
+    gpsStatus.className = `status-msg status-${type}`;
+    gpsStatus.classList.remove('hidden');
 }
 function disableAttendanceBtns() {
     document.getElementById('btn-checkin').disabled = true;

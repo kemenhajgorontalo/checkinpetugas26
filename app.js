@@ -18,6 +18,10 @@ let currentType = null;
 let currentChallenge = "";
 let userLocation = null;
 let videoStream = null;
+let currentReportRows = [];
+let reportCurrentPage = 1;
+const ATTENDANCE_COLLECTION = "attendance";
+const REPORT_PAGE_SIZE = 10;
 
 // DOM Elements
 const loginScreen = document.getElementById('login-screen');
@@ -34,6 +38,10 @@ const employeeSearch = document.getElementById('employee-search');
 const challengeText = document.getElementById('challenge-text');
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
+const reportEmployeeSearch = document.getElementById('report-employee-search');
+const photoModal = document.getElementById('photo-modal');
+const photoModalImg = document.getElementById('photo-modal-img');
+const photoModalCaption = document.getElementById('photo-modal-caption');
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => {
@@ -84,13 +92,29 @@ function setupEventListeners() {
     
     document.getElementById('btn-export-csv').addEventListener('click', exportToCSV);
     
-    document.getElementById('filter-employee').addEventListener('change', renderReport);
-    document.getElementById('filter-date-start').addEventListener('change', renderReport);
-    document.getElementById('filter-date-end').addEventListener('change', renderReport);
+    reportEmployeeSearch.addEventListener('input', (e) => {
+        renderReportEmployeeOptions(e.target.value);
+        resetReportPageAndRender();
+    });
+    document.getElementById('filter-employee').addEventListener('change', resetReportPageAndRender);
+    document.getElementById('filter-date-start').addEventListener('change', resetReportPageAndRender);
+    document.getElementById('filter-date-end').addEventListener('change', resetReportPageAndRender);
+    document.getElementById('btn-report-prev').addEventListener('click', () => changeReportPage(-1));
+    document.getElementById('btn-report-next').addEventListener('click', () => changeReportPage(1));
+    document.getElementById('btn-close-photo-modal').addEventListener('click', closePhotoModal);
+    photoModal.addEventListener('click', (e) => {
+        if (e.target === photoModal) closePhotoModal();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !photoModal.classList.contains('hidden')) {
+            closePhotoModal();
+        }
+    });
 
     document.getElementById('btn-back-home').addEventListener('click', () => {
         summaryArea.classList.add('hidden');
         actionArea.classList.remove('hidden');
+        resetCapturePreview();
         updateAttendanceStatus();
     });
 }
@@ -125,7 +149,10 @@ function showMainScreen() {
 // --- Attendance Logic ---
 
 async function updateAttendanceStatus() {
-    if (!currentEmployeeId) return;
+    if (!currentEmployeeId) {
+        resetAttendanceStatus();
+        return;
+    }
     const today = formatDateMakassar(new Date());
     
     try {
@@ -142,11 +169,17 @@ async function updateAttendanceStatus() {
         btnOut.disabled = !ci || !!co; 
     } catch (err) {
         console.error(err);
+        disableAttendanceBtns();
         showGlobalStatus("Gagal mengambil status absensi.", "error");
     }
 }
 
 async function startAttendance(type) {
+    if (!currentEmployeeId || !currentEmployeeName) {
+        showGlobalStatus("Pilih nama petugas terlebih dahulu.", "error");
+        return;
+    }
+
     currentType = type;
     showGlobalStatus("Meminta akses GPS...", "info");
     
@@ -180,12 +213,13 @@ async function handleCapture() {
 
     try {
         const dataUrl = await captureWatermarkedPhoto();
-        await saveAttendanceRecordLocal(dataUrl);
+        await saveAttendanceRecord(dataUrl);
         
         document.getElementById('captured-photo-preview').src = dataUrl;
         
         stopCamera();
         cameraArea.classList.add('hidden');
+        actionArea.classList.add('hidden');
         summaryArea.classList.remove('hidden');
         showGlobalStatus("");
     } catch (err) {
@@ -202,6 +236,7 @@ async function startCamera() {
             video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } } 
         });
         video.srcObject = videoStream;
+        await waitForVideoReady();
     } catch (err) {
         throw new Error("Kamera tidak aktif.");
     }
@@ -214,6 +249,10 @@ function stopCamera() {
 }
 
 async function captureWatermarkedPhoto() {
+    if (!video.videoWidth || !video.videoHeight) {
+        throw new Error("Kamera belum siap. Coba tunggu sebentar lalu ambil ulang.");
+    }
+
     const ctx = canvas.getContext('2d');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -243,7 +282,7 @@ async function captureWatermarkedPhoto() {
     return canvas.toDataURL('image/jpeg', 0.8);
 }
 
-async function saveAttendanceRecordLocal(dataUrl) {
+async function saveAttendanceRecord(dataUrl) {
     const now = new Date();
     const dist = calculateDistanceMeters(
         userLocation.latitude, 
@@ -251,6 +290,7 @@ async function saveAttendanceRecordLocal(dataUrl) {
         CONFIG.OFFICE_LOCATION.LAT,
         CONFIG.OFFICE_LOCATION.LNG
     );
+    const photoUpload = await uploadPhotoToCloudinary(dataUrl);
 
     const record = {
         employeeId: currentEmployeeId,
@@ -263,32 +303,63 @@ async function saveAttendanceRecordLocal(dataUrl) {
         distanceFromOfficeMeters: Math.round(dist),
         localDate: formatDateMakassar(now),
         localTime: formatTimeMakassar(now),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        source: "web",
+        photoUrl: photoUpload?.secure_url || "",
+        photoPublicId: photoUpload?.public_id || "",
+        photoStatus: photoUpload ? "uploaded" : "not_configured"
     };
-    const history = JSON.parse(localStorage.getItem('attendance_history') || '[]');
-    history.push(record);
-    localStorage.setItem('attendance_history', JSON.stringify(history));
+
+    try {
+        await addDoc(collection(db, ATTENDANCE_COLLECTION), {
+            ...record,
+            createdAtServer: serverTimestamp()
+        });
+        cacheAttendanceRecord(record);
+    } catch (err) {
+        console.error(err);
+        cacheAttendanceRecord({ ...record, syncStatus: "pending" });
+        throw new Error("Data belum tersimpan ke Firebase. Coba cek koneksi internet lalu ulangi.");
+    }
 }
 
 async function hasAttendanceToday(employeeId, localDate, type) {
-    const history = JSON.parse(localStorage.getItem('attendance_history') || '[]');
-    return history.some(r => r.employeeId === employeeId && r.localDate === localDate && r.type === type);
+    try {
+        const q = query(
+            collection(db, ATTENDANCE_COLLECTION),
+            where("employeeId", "==", employeeId),
+            where("localDate", "==", localDate),
+            where("type", "==", type)
+        );
+        const snap = await getDocs(q);
+        return !snap.empty;
+    } catch (err) {
+        console.error(err);
+        const history = getCachedAttendanceHistory();
+        return history.some(r => r.employeeId === employeeId && r.localDate === localDate && r.type === type);
+    }
 }
 
 // --- Report ---
 
 function openReport() {
     reportScreen.classList.remove('hidden');
-    renderReportEmployeeOptions(); // Inisialisasi daftar nama di laporan
+    renderReportEmployeeOptions(reportEmployeeSearch.value);
+    reportCurrentPage = 1;
     
     const today = formatDateMakassar(new Date());
-    document.getElementById('filter-date-start').value = today;
-    document.getElementById('filter-date-end').value = today;
+    if (!document.getElementById('filter-date-start').value) {
+        document.getElementById('filter-date-start').value = today;
+    }
+    if (!document.getElementById('filter-date-end').value) {
+        document.getElementById('filter-date-end').value = today;
+    }
     renderReport();
 }
 
 function renderReportEmployeeOptions(filterText = "") {
     const select = document.getElementById('filter-employee');
+    const selectedBefore = select.value;
     const term = filterText.toLowerCase().trim();
 
     select.innerHTML = '<option value="">Semua Petugas</option>';
@@ -304,9 +375,10 @@ function renderReportEmployeeOptions(filterText = "") {
         select.appendChild(opt);
     });
 
-    // Auto select jika hasil pencarian unik (seperti di dashboard utama)
     if (filtered.length === 1 && term !== "") {
         select.value = filtered[0].id;
+    } else if (filtered.some(emp => emp.id === selectedBefore)) {
+        select.value = selectedBefore;
     }
 }
 
@@ -314,16 +386,23 @@ function closeReport() {
     reportScreen.classList.add('hidden');
 }
 
-function renderReport() {
+async function renderReport() {
     const searchTerms = document.getElementById('report-employee-search').value.toLowerCase().trim();
     const filterId = document.getElementById('filter-employee').value;
     const dS = document.getElementById('filter-date-start').value;
     const dE = document.getElementById('filter-date-end').value;
-    
-    const history = JSON.parse(localStorage.getItem('attendance_history') || '[]');
-    
-    const filtered = history.filter(r => {
-        // 1. Logika Filter Nama/ID
+
+    const list = document.getElementById('report-list');
+    const summary = document.getElementById('report-summary');
+    const pagination = document.getElementById('report-pagination');
+    list.innerHTML = '';
+    pagination.classList.add('hidden');
+    summary.classList.remove('hidden');
+    summary.textContent = "Memuat data...";
+
+    const history = await getAttendanceHistory();
+
+    currentReportRows = history.filter(r => {
         let matchName = true;
         if (filterId) {
             matchName = (r.employeeId === filterId);
@@ -332,49 +411,117 @@ function renderReport() {
                         r.employeeId.toLowerCase().includes(searchTerms);
         }
 
-        // 2. Logika Filter Tanggal
-        // Jika sedang mencari nama secara spesifik, tampilkan SEMUA riwayatnya agar mudah ditemukan
-        if ((filterId || searchTerms) && (dS === dE)) {
-            const today = formatDateMakassar(new Date());
-            if (dS === today) return matchName; 
-        }
-
-        const matchDate = r.localDate >= dS && r.localDate <= dE;
+        const afterStart = !dS || r.localDate >= dS;
+        const beforeEnd = !dE || r.localDate <= dE;
+        const matchDate = afterStart && beforeEnd;
         return matchName && matchDate;
     }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    const list = document.getElementById('report-list');
-    list.innerHTML = '';
+    summary.textContent = `${currentReportRows.length} data ditemukan`;
 
-    if (filtered.length === 0) {
+    if (currentReportRows.length === 0) {
         list.innerHTML = `<div style="text-align:center;padding:40px;opacity:0.5;">
             <p>Data tidak ditemukan.</p>
         </div>`;
         return;
     }
 
-    filtered.forEach(r => {
+    const totalPages = Math.max(1, Math.ceil(currentReportRows.length / REPORT_PAGE_SIZE));
+    if (reportCurrentPage > totalPages) reportCurrentPage = totalPages;
+    if (reportCurrentPage < 1) reportCurrentPage = 1;
+
+    const startIndex = (reportCurrentPage - 1) * REPORT_PAGE_SIZE;
+    const pageRows = currentReportRows.slice(startIndex, startIndex + REPORT_PAGE_SIZE);
+    summary.textContent = `${currentReportRows.length} data ditemukan · Menampilkan ${startIndex + 1}-${startIndex + pageRows.length}`;
+
+    let lastDate = "";
+    pageRows.forEach(r => {
+        if (r.localDate !== lastDate) {
+            const dateGroup = document.createElement('div');
+            dateGroup.className = 'report-date-group';
+            dateGroup.textContent = formatDisplayDate(r.localDate);
+            list.appendChild(dateGroup);
+            lastDate = r.localDate;
+        }
+
         const card = document.createElement('div');
         card.className = 'attendance-card';
+        const photoMarkup = r.photoUrl ? `
+            <button class="photo-thumb-btn" type="button" data-photo-url="${escapeAttr(r.photoUrl)}" data-caption="${escapeAttr(`${r.employeeName} - ${r.localDate} ${r.localTime}`)}" aria-label="Lihat foto ${escapeAttr(r.employeeName)}">
+                <img class="photo-thumb" src="${escapeAttr(r.photoUrl)}" alt="Foto ${escapeAttr(r.employeeName)}" loading="lazy">
+            </button>
+        ` : `<div class="photo-thumb-placeholder">Tanpa Foto</div>`;
+
         card.innerHTML = `
+            ${photoMarkup}
             <div class="card-info">
                 <div class="emp-name">${r.employeeName}</div>
-                <div class="time-info">📅 ${r.localDate} | ⏰ ${r.localTime}</div>
+                <div class="time-info">Tanggal: ${r.localDate}</div>
+                <div class="time-info">Waktu: ${r.localTime}</div>
             </div>
             <div class="card-badge badge-${r.type}">${r.type === 'checkin' ? 'Check-In' : 'Check-Out'}</div>
         `;
+        const thumbBtn = card.querySelector('.photo-thumb-btn');
+        if (thumbBtn) {
+            thumbBtn.addEventListener('click', () => {
+                openPhotoModal(thumbBtn.dataset.photoUrl, thumbBtn.dataset.caption);
+            });
+        }
         list.appendChild(card);
     });
+
+    updateReportPagination(totalPages);
 }
 
-function exportToCSV() {
-    const history = JSON.parse(localStorage.getItem('attendance_history') || '[]');
-    if (!history.length) return alert("Kosong.");
-    const h = ["Tanggal", "Waktu", "Nama", "Tipe", "Lat", "Lng"];
-    const rows = history.map(r => [r.localDate, r.localTime, r.employeeName, r.type, r.latitude, r.longitude]);
-    let csv = "data:text/csv;charset=utf-8," + h.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
+function resetReportPageAndRender() {
+    reportCurrentPage = 1;
+    renderReport();
+}
+
+function changeReportPage(delta) {
+    const totalPages = Math.max(1, Math.ceil(currentReportRows.length / REPORT_PAGE_SIZE));
+    reportCurrentPage = Math.min(totalPages, Math.max(1, reportCurrentPage + delta));
+    renderReport();
+}
+
+function updateReportPagination(totalPages) {
+    const pagination = document.getElementById('report-pagination');
+    const prev = document.getElementById('btn-report-prev');
+    const next = document.getElementById('btn-report-next');
+    const info = document.getElementById('report-page-info');
+
+    if (totalPages <= 1) {
+        pagination.classList.add('hidden');
+        return;
+    }
+
+    pagination.classList.remove('hidden');
+    prev.disabled = reportCurrentPage <= 1;
+    next.disabled = reportCurrentPage >= totalPages;
+    info.textContent = `Halaman ${reportCurrentPage} dari ${totalPages}`;
+}
+
+async function exportToCSV() {
+    await renderReport();
+    if (!currentReportRows.length) return alert("Tidak ada data sesuai filter.");
+
+    const h = ["Tanggal", "Waktu", "Nama", "Tipe", "Lat", "Lng", "Akurasi", "Jarak", "Tantangan"];
+    const rows = currentReportRows.map(r => [
+        r.localDate,
+        r.localTime,
+        r.employeeName,
+        r.type,
+        r.latitude,
+        r.longitude,
+        r.accuracy,
+        r.distanceFromOfficeMeters,
+        r.challenge
+    ]);
+    let csv = "data:text/csv;charset=utf-8," + [h, ...rows].map(row => row.map(csvCell).join(",")).join("\n");
     const link = document.createElement("a");
-    link.href = encodeURI(csv); link.download = "Laporan.csv"; link.click();
+    link.href = encodeURI(csv);
+    link.download = `Laporan_Absensi_${formatDateMakassar(new Date())}.csv`;
+    link.click();
 }
 
 window.clearLocalData = function() {
@@ -416,8 +563,101 @@ function formatTimeMakassar(date) {
     return date.toLocaleTimeString('id-ID', { timeZone: 'Asia/Makassar', hour12: false });
 }
 
+function formatDisplayDate(localDate) {
+    const [year, month, day] = String(localDate || "").split("-").map(Number);
+    if (!year || !month || !day) return localDate || "Tanggal tidak diketahui";
+
+    return new Intl.DateTimeFormat("id-ID", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        timeZone: "Asia/Makassar"
+    }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+async function uploadPhotoToCloudinary(dataUrl) {
+    if (!isCloudinaryConfigured()) {
+        return null;
+    }
+
+    const form = new FormData();
+    form.append("file", dataUrl);
+    form.append("upload_preset", CONFIG.CLOUDINARY.UPLOAD_PRESET);
+    form.append("folder", "checkinpetugas26");
+    form.append("tags", "checkinpetugas26,absensi");
+    form.append("context", [
+        `employee_id=${currentEmployeeId}`,
+        `employee_name=${currentEmployeeName}`,
+        `type=${currentType}`,
+        `local_date=${formatDateMakassar(new Date())}`
+    ].join("|"));
+
+    const endpoint = `https://api.cloudinary.com/v1_1/${CONFIG.CLOUDINARY.CLOUD_NAME}/image/upload`;
+    const res = await fetch(endpoint, { method: "POST", body: form });
+    const body = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+        throw new Error(body.error?.message || "Upload foto ke Cloudinary gagal.");
+    }
+
+    return body;
+}
+
+function isCloudinaryConfigured() {
+    return CONFIG.CLOUDINARY?.CLOUD_NAME &&
+        CONFIG.CLOUDINARY?.UPLOAD_PRESET &&
+        CONFIG.CLOUDINARY.CLOUD_NAME !== "YOUR_CLOUD_NAME" &&
+        CONFIG.CLOUDINARY.UPLOAD_PRESET !== "YOUR_UNSIGNED_UPLOAD_PRESET";
+}
+
+async function getAttendanceHistory() {
+    try {
+        const snap = await getDocs(collection(db, ATTENDANCE_COLLECTION));
+        const rows = snap.docs.map(doc => normalizeAttendanceRecord(doc.data()));
+        localStorage.setItem('attendance_history', JSON.stringify(rows));
+        return rows;
+    } catch (err) {
+        console.error(err);
+        showGlobalStatus("Gagal mengambil data Firebase. Menampilkan cache lokal.", "error");
+        return getCachedAttendanceHistory();
+    }
+}
+
+function normalizeAttendanceRecord(record) {
+    return {
+        ...record,
+        createdAt: record.createdAt || record.createdAtServer?.toDate?.()?.toISOString?.() || ""
+    };
+}
+
+function getCachedAttendanceHistory() {
+    return JSON.parse(localStorage.getItem('attendance_history') || '[]');
+}
+
+function cacheAttendanceRecord(record) {
+    const history = getCachedAttendanceHistory();
+    history.push(record);
+    localStorage.setItem('attendance_history', JSON.stringify(history));
+}
+
+function openPhotoModal(url, caption) {
+    photoModalImg.src = url;
+    photoModalCaption.textContent = caption || "Foto absensi";
+    photoModal.classList.remove('hidden');
+    photoModal.setAttribute('aria-hidden', 'false');
+}
+
+function closePhotoModal() {
+    photoModal.classList.add('hidden');
+    photoModal.setAttribute('aria-hidden', 'true');
+    photoModalImg.removeAttribute('src');
+    photoModalCaption.textContent = "";
+}
+
 function renderEmployeeOptions(f = "") {
     const term = f.toLowerCase().trim();
+    const selectedBefore = currentEmployeeId;
     employeeSelect.innerHTML = '<option value="">-- Hasil Pencarian --</option>';
     const filtered = CONFIG.EMPLOYEES.filter(e => e.name.toLowerCase().includes(term));
     
@@ -433,12 +673,72 @@ function renderEmployeeOptions(f = "") {
         currentEmployeeId = filtered[0].id;
         currentEmployeeName = filtered[0].name;
         updateAttendanceStatus();
+    } else if (filtered.some(e => e.id === selectedBefore)) {
+        employeeSelect.value = selectedBefore;
     } else if (term === "") {
-        employeeSelect.value = "";
-        currentEmployeeId = null;
-        currentEmployeeName = null;
-        disableAttendanceBtns();
+        clearSelectedEmployee();
+    } else {
+        clearSelectedEmployee();
     }
+}
+
+function clearSelectedEmployee() {
+    employeeSelect.value = "";
+    currentEmployeeId = null;
+    currentEmployeeName = null;
+    resetAttendanceStatus();
+    disableAttendanceBtns();
+}
+
+function resetAttendanceStatus() {
+    document.querySelector('#status-checkin .val').textContent = "-";
+    document.querySelector('#status-checkout .val').textContent = "-";
+}
+
+function resetCapturePreview() {
+    document.getElementById('captured-photo-preview').removeAttribute('src');
+}
+
+function waitForVideoReady() {
+    if (video.readyState >= 2 && video.videoWidth && video.videoHeight) {
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error("Kamera belum siap."));
+        }, 5000);
+
+        function cleanup() {
+            clearTimeout(timeout);
+            video.removeEventListener('loadedmetadata', onReady);
+            video.removeEventListener('canplay', onReady);
+        }
+
+        function onReady() {
+            if (video.videoWidth && video.videoHeight) {
+                cleanup();
+                resolve();
+            }
+        }
+
+        video.addEventListener('loadedmetadata', onReady);
+        video.addEventListener('canplay', onReady);
+    });
+}
+
+function csvCell(value) {
+    const text = value === undefined || value === null ? "" : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+}
+
+function escapeAttr(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
 }
 
 function showStatus(el, msg, type) { el.textContent = msg; el.className = `status-msg status-${type}`; el.classList.remove('hidden'); }

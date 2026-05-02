@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Absensi Internal - Gorontalo</title>
+    <link rel="icon" type="image/png" href="assets/logo-kementerian-haji-umrah.png">
+    <link rel="apple-touch-icon" href="assets/logo-kementerian-haji-umrah.png">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,6 +13,7 @@
     <div class="container" id="app-container">
         <!-- Login Screen -->
         <section id="login-screen">
+            <img class="app-logo" src="assets/logo-kementerian-haji-umrah.png" alt="Logo Kementerian Haji dan Umrah">
             <h1>Absensi Internal</h1>
             <p style="text-align: center;">Silakan masukkan password akses untuk melanjutkan.</p>
             <div class="form-group">
@@ -24,7 +27,8 @@
         <!-- Main Screen -->
         <section id="main-screen" class="hidden">
             <header>
-                <h1 id="app-title">Absensi Karyawan</h1>
+                <img class="app-logo" src="assets/logo-kementerian-haji-umrah.png" alt="Logo Kementerian Haji dan Umrah">
+                <h1 id="app-title">Absensi Petugas</h1>
                 <div id="user-info" class="attendance-status">
                     <p style="font-weight: 600; margin-bottom: 5px;">Status Hari Ini:</p>
                     <div id="status-checkin"><span>Check-In:</span> <span class="val">-</span></div>
@@ -71,7 +75,7 @@
             <!-- Final Summary Area -->
             <div id="summary-area" class="hidden">
                 <div class="status-msg status-success">
-                    Berhasil! Absensi Anda telah tercatat (Local Mode).
+                    Berhasil! Absensi Anda telah tercatat.
                 </div>
                 <div id="photo-preview-container" style="margin-bottom: 20px; border-radius: 15px; overflow: hidden; border: 2px solid var(--tan);">
                     <img id="captured-photo-preview" style="width: 100%; display: block;">
@@ -82,12 +86,14 @@
             <div id="global-status" class="status-msg hidden"></div>
 
             <span class="logout-link" id="btn-logout">Logout</span>
+            <footer class="app-footer">PPIH Embarkasi Antara Kemenhaj Gorontalo 2026</footer>
         </section>
     </div>
 
     <!-- Report Screen (Fixed Modal) -->
     <div id="report-screen" class="hidden">
         <div class="report-header">
+            <img class="report-logo" src="assets/logo-kementerian-haji-umrah.png" alt="Logo Kementerian Haji dan Umrah">
             <h1 style="margin-bottom: 0;">Laporan Absensi</h1>
         </div>
 
@@ -102,7 +108,8 @@
                     <select id="filter-employee">
                         <option value="">Semua Petugas</option>
                     </select>
-                </div>                <div class="filter-row">
+                </div>
+                <div class="filter-row">
                     <div class="form-group">
                         <label>Mulai</label>
                         <input type="date" id="filter-date-start">
@@ -115,13 +122,28 @@
                 <button id="btn-export-csv" class="btn btn-outline" style="margin-top: 10px;">Unduh CSV (Excel)</button>
             </div>
 
+            <div id="report-summary" class="report-summary hidden"></div>
             <div id="report-list">
                 <!-- Data cards will be rendered here -->
+            </div>
+            <div id="report-pagination" class="report-pagination hidden">
+                <button id="btn-report-prev" class="pagination-btn" type="button">Sebelumnya</button>
+                <span id="report-page-info" class="pagination-info"></span>
+                <button id="btn-report-next" class="pagination-btn" type="button">Berikutnya</button>
             </div>
         </div>
         
         <div class="report-footer">
+            <div class="app-footer report-footer-text">PPIH Embarkasi Antara Kemenhaj Gorontalo 2026</div>
             <button id="btn-close-report" class="btn btn-primary">Tutup Laporan</button>
+        </div>
+    </div>
+
+    <div id="photo-modal" class="photo-modal hidden" aria-hidden="true">
+        <div class="photo-modal-content" role="dialog" aria-modal="true" aria-label="Foto absensi">
+            <button id="btn-close-photo-modal" class="photo-modal-close" type="button" aria-label="Tutup foto">×</button>
+            <img id="photo-modal-img" alt="Foto absensi">
+            <div id="photo-modal-caption" class="photo-modal-caption"></div>
         </div>
     </div>
 
